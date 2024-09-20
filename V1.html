@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Image Analysis Tool</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            font-family: Arial, sans-serif;
+        }
+        #controls {
+            padding: 10px;
+            background-color: #f0f0f0;
+        }
+        #imageContainer {
+            position: relative;
+            width: 100%;
+        }
+        #uploadedImage {
+            width: 100%;
+            display: block;
+        }
+        #canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background-color: rgba(255, 255, 255, 0.7);
+            padding: 5px;
+            border-radius: 5px;
+        }
+        #historyTable {
+            margin-top: 20px;
+            width: 100%;
+            border-collapse: collapse;
+        }
+        #historyTable th, #historyTable td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        #historyTable th {
+            background-color: #f2f2f2;
+        }
+        #searchResult {
+            color: red;
+            font-weight: bold;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div id="controls">
+        <input type="file" id="imageUpload" accept="image/*">
+        <label for="radiusInput">Circle Radius:</label>
+        <input type="number" id="radiusInput" min="1" value="10">
+        <span>Press "R" to record info</span>
+        <span>Press "S" to enter search mode. Press "S" again to quit</span>
+    </div>
+    <div id="imageContainer">
+        <img id="uploadedImage" alt="Uploaded image">
+        <canvas id="canvas"></canvas>
+        <div id="info"></div>
+    </div>
+    <table id="historyTable">
+        <thead>
+            <tr>
+                <th>RGB</th>
+                <th>Averaged RGB</th>
+                <th>Coordinates</th>
+                <th>Radius</th>
+            </tr>
+        </thead>
+        <tbody id="historyTableBody">
+        </tbody>
+    </table>
+    <div id="searchResult"></div>
+
+    <script>
+        const imageUpload = document.getElementById('imageUpload');
+        const radiusInput = document.getElementById('radiusInput');
+        const uploadedImage = document.getElementById('uploadedImage');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const info = document.getElementById('info');
+        const imageContainer = document.getElementById('imageContainer');
+        const historyTableBody = document.getElementById('historyTableBody');
+        const searchResult = document.getElementById('searchResult');
+
+        let imageData;
+        let scale;
+        let currentX, currentY, currentRGB, currentAvgRGB;
+        let isSearchMode = false;
+        let minAvgRGB = Infinity;
+        let minAvgRGBPoint = null;
+
+        imageUpload.addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            const reader = new FileReader();
+
+            reader.onload = function(event) {
+                uploadedImage.src = event.target.result;
+                uploadedImage.onload = function() {
+                    resizeCanvas();
+                    drawImageToCanvas();
+                }
+            }
+
+            reader.readAsDataURL(file);
+        });
+
+        function resizeCanvas() {
+            canvas.width = uploadedImage.width;
+            canvas.height = uploadedImage.height;
+            scale = canvas.width / uploadedImage.naturalWidth;
+        }
+
+        function drawImageToCanvas() {
+            ctx.drawImage(uploadedImage, 0, 0, canvas.width, canvas.height);
+            imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        }
+
+        canvas.addEventListener('mousemove', function(e) {
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            const radius = parseInt(radiusInput.value);
+
+            drawImageToCanvas();
+            drawCircle(x, y, radius);
+            currentRGB = getAverageRGB(x, y, radius);
+            currentAvgRGB = getAveragedRGB(currentRGB);
+            currentX = x / scale;
+            currentY = y / scale;
+            updateInfo(currentX, currentY, currentRGB, currentAvgRGB);
+
+            if (isSearchMode) {
+                if (currentAvgRGB < minAvgRGB) {
+                    minAvgRGB = currentAvgRGB;
+                    minAvgRGBPoint = { x: currentX, y: currentY, rgb: currentRGB, avgRGB: currentAvgRGB, radius: radius };
+                }
+                updateSearchInfo();
+            }
+        });
+
+        function drawCircle(x, y, radius) {
+            ctx.beginPath();
+            ctx.arc(x, y, radius, 0, 2 * Math.PI);
+            ctx.strokeStyle = 'white';
+            ctx.stroke();
+        }
+
+        function getAverageRGB(centerX, centerY, radius) {
+            let r = 0, g = 0, b = 0, count = 0;
+
+            for (let x = centerX - radius; x < centerX + radius; x++) {
+                for (let y = centerY - radius; y < centerY + radius; y++) {
+                    if (Math.sqrt((x - centerX) ** 2 + (y - centerY) ** 2) <= radius) {
+                        const i = (Math.floor(y) * imageData.width + Math.floor(x)) * 4;
+                        r += imageData.data[i];
+                        g += imageData.data[i + 1];
+                        b += imageData.data[i + 2];
+                        count++;
+                    }
+                }
+            }
+
+            return {
+                r: (r / count).toFixed(2),
+                g: (g / count).toFixed(2),
+                b: (b / count).toFixed(2)
+            };
+        }
+
+        function getAveragedRGB(rgb) {
+            return ((parseFloat(rgb.r) + parseFloat(rgb.g) + parseFloat(rgb.b)) / 3).toFixed(2);
+        }
+
+        function updateInfo(x, y, rgb, avgRGB) {
+            info.textContent = `RGB: (${rgb.r}, ${rgb.g}, ${rgb.b}) | Avg RGB: ${avgRGB} | Center: (${Math.round(x)}, ${Math.round(y)})`;
+            info.style.color = isSearchMode ? 'red' : 'black';
+        }
+
+        function updateSearchInfo() {
+            if (minAvgRGBPoint) {
+                info.textContent = `Min Avg RGB: ${minAvgRGBPoint.avgRGB} | Center: (${Math.round(minAvgRGBPoint.x)}, ${Math.round(minAvgRGBPoint.y)})`;
+                info.style.color = 'red';
+            }
+        }
+
+        window.addEventListener('resize', function() {
+            resizeCanvas();
+            drawImageToCanvas();
+        });
+
+        document.addEventListener('keydown', function(e) {
+            if (e.key.toLowerCase() === 'r') {
+                recordInfo();
+            } else if (e.key.toLowerCase() === 's') {
+                toggleSearchMode();
+            }
+        });
+
+        function recordInfo() {
+            if (!currentRGB) return;
+
+            const row = historyTableBody.insertRow(0);
+            const rgbCell = row.insertCell(0);
+            const avgRGBCell = row.insertCell(1);
+            const coordCell = row.insertCell(2);
+            const radiusCell = row.insertCell(3);
+
+            rgbCell.textContent = `(${currentRGB.r}, ${currentRGB.g}, ${currentRGB.b})`;
+            avgRGBCell.textContent = currentAvgRGB;
+            coordCell.textContent = `(${Math.round(currentX)}, ${Math.round(currentY)})`;
+            radiusCell.textContent = radiusInput.value;
+        }
+
+        function toggleSearchMode() {
+            isSearchMode = !isSearchMode;
+            if (isSearchMode) {
+                minAvgRGB = Infinity;
+                minAvgRGBPoint = null;
+                searchResult.textContent = '';
+            } else {
+                if (minAvgRGBPoint) {
+                    searchResult.innerHTML = `Minimum Avg RGB: ${minAvgRGBPoint.avgRGB}<br>
+                                              RGB: (${minAvgRGBPoint.rgb.r}, ${minAvgRGBPoint.rgb.g}, ${minAvgRGBPoint.rgb.b})<br>
+                                              Coordinates: (${Math.round(minAvgRGBPoint.x)}, ${Math.round(minAvgRGBPoint.y)})<br>
+                                              Radius: ${minAvgRGBPoint.radius}`;
+                }
+            }
+            updateInfo(currentX, currentY, currentRGB, currentAvgRGB);
+        }
+    </script>
+</body>
+</html>
